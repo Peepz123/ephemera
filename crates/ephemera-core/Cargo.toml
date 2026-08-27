@@ -1,0 +1,23 @@
+[package]
+name = "ephemera-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "X3DH and Double Ratchet for the ephemera protocol. Synchronous, no I/O."
+
+[dependencies]
+ephemera-wire.workspace = true
+zeroize.workspace = true
+thiserror.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+hkdf.workspace = true
+subtle.workspace = true
+rand_core.workspace = true
+x25519-dalek.workspace = true
+ed25519-dalek.workspace = true
+chacha20poly1305.workspace = true
+
+[dev-dependencies]
+hex.workspace = true
+x25519-dalek.workspace = true

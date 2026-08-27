@@ -1,0 +1,12 @@
+[package]
+name = "ephemera-wire"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Envelope encoding for the ephemera protocol. No cryptography, no I/O."
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+hex.workspace = true
