@@ -117,7 +117,7 @@ pub fn initiate(
 /// Must reproduce the same DH values from the private counterparts, in the same
 /// order. Before deriving, check replay conditions per PROTOCOL.md 4.2:
 /// the one-time prekey must not already be consumed, and `ek_a` must be unseen.
-#[allow(unused_variables)] // remove once implemented
+
 pub fn respond(
     identity: &IdentityKeyPair,
     spk: &SignedPreKey,
@@ -125,7 +125,22 @@ pub fn respond(
     initiator_ik_dh: &PublicKey,
     initial: &InitialMessage,
 ) -> Result<RootKey> {
-    todo!("Phase 1: mirror `initiate`, same DH order")
+    let dh1 = agree(&spk.secret, initiator_ik_dh)?;
+    let dh2 = agree(&identity.dh, &initial.ek_a)?;
+    let dh3 = agree(&spk.secret, &initial.ek_a)?;
+    let mut dh_concat = Vec::new();
+    dh_concat.extend_from_slice(&F_PREFIX);
+    dh_concat.extend_from_slice(&dh1);
+    dh_concat.extend_from_slice(&dh2);
+    dh_concat.extend_from_slice(&dh3);  
+        if let Some(opk) = opk {
+        let dh4 = agree(&opk.secret, &initial.ek_a)?;
+        dh_concat.extend_from_slice(&dh4);
+    }
+
+    let sk = derive_sk(&mut dh_concat);
+
+    Ok(sk)
 }
 
 /// Helper retained for the implementation: performs one agreement and checks it.
