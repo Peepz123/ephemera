@@ -7,7 +7,7 @@
 //! Diffie-Hellman operations and the HKDF call are yours.
 //!
 //! Conformance test 3 in `tests/conformance.rs` is the definition of done.
-
+use rand_core::OsRng;
 use ed25519_dalek::VerifyingKey;
 use hkdf::Hkdf;
 use sha2::Sha256;
@@ -84,8 +84,13 @@ pub fn initiate(
     identity: &IdentityKeyPair,
     bundle: &PreKeyBundle,
 ) -> Result<(RootKey, InitialMessage)> {
-    todo!("Phase 1: see the checklist above and PROTOCOL.md section 4")
-}
+    bundle.verify()?;
+    let ek_a = StaticSecret::random_from_rng(OsRng);
+    let dh1 = agree(&identity.dh, &bundle.spk_pub)?;
+    let dh2 = agree(&ek_a, &bundle.identity.dh)?;
+    let dh3 = agree(&ek_a, &bundle.spk_pub)?;
+    todo!("rest of X3DH")
+    }
 
 /// Responder side of X3DH.
 ///
