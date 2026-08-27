@@ -27,7 +27,12 @@ impl Pair {
         let bob = IdentityKeyPair::generate();
         let bob_spk = SignedPreKey::generate(1, &bob);
         let bob_opk = OneTimePreKey::generate_batch(1, 1).pop().expect("one key");
-        Pair { alice: IdentityKeyPair::generate(), bob, bob_spk, bob_opk }
+        Pair {
+            alice: IdentityKeyPair::generate(),
+            bob,
+            bob_spk,
+            bob_opk,
+        }
     }
 
     fn bundle(&self, with_opk: bool) -> PreKeyBundle {
@@ -38,7 +43,11 @@ impl Pair {
             spk_pub: self.bob_spk.public(),
             spk_sig: self.bob_spk.signature,
             opk_id: if with_opk { self.bob_opk.id } else { OPK_NONE },
-            opk_pub: if with_opk { Some(self.bob_opk.public()) } else { None },
+            opk_pub: if with_opk {
+                Some(self.bob_opk.public())
+            } else {
+                None
+            },
         }
     }
 
@@ -93,8 +102,8 @@ fn t3b_x3dh_agreement_three_dh() {
     let bundle = p.bundle(false);
     assert!(bundle.is_reduced_forward_secrecy());
     let (sk_a, initial) = x3dh::initiate(&p.alice, &bundle).expect("initiate");
-    let sk_b = x3dh::respond(&p.bob, &p.bob_spk, None, &p.alice.public().dh, &initial)
-        .expect("respond");
+    let sk_b =
+        x3dh::respond(&p.bob, &p.bob_spk, None, &p.alice.public().dh, &initial).expect("respond");
     assert_eq!(sk_a.0, sk_b.0);
 }
 
@@ -127,7 +136,10 @@ fn t5_ratchet_out_of_order() {
         .collect();
 
     for (plain, ct) in sent.iter().rev() {
-        assert_eq!(b.decrypt(ct).expect("out-of-order decrypt"), plain.as_bytes());
+        assert_eq!(
+            b.decrypt(ct).expect("out-of-order decrypt"),
+            plain.as_bytes()
+        );
     }
 }
 
@@ -168,7 +180,11 @@ fn t7_skip_limit_is_enforced_atomically() {
     let n_recv_before = b.n_recv;
 
     assert!(b.decrypt(&far.expect("message")).is_err(), "must refuse");
-    assert_eq!(b.skipped.len(), skipped_before, "must not store partial keys");
+    assert_eq!(
+        b.skipped.len(),
+        skipped_before,
+        "must not store partial keys"
+    );
     assert_eq!(b.n_recv, n_recv_before, "must not advance the chain");
 }
 
@@ -200,7 +216,10 @@ fn t9_header_tampering_fails_aead() {
 
     let mut tampered_key = base.clone();
     tampered_key.ratchet_pub[0] ^= 1;
-    assert!(b.decrypt(&tampered_key).is_err(), "ratchet_pub must be authenticated");
+    assert!(
+        b.decrypt(&tampered_key).is_err(),
+        "ratchet_pub must be authenticated"
+    );
 }
 
 /// Test 10 — a valid envelope from one session must fail against another.

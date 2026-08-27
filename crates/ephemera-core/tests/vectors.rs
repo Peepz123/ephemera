@@ -85,5 +85,9 @@ fn vector_2b_x25519_rfc7748_shared_secret() {
 
     let expected = "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742";
     assert_eq!(hex::encode(ab.as_bytes()), expected);
-    assert_eq!(hex::encode(ba.as_bytes()), expected, "agreement must commute");
+    assert_eq!(
+        hex::encode(ba.as_bytes()),
+        expected,
+        "agreement must commute"
+    );
 }

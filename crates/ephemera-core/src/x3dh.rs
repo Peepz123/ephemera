@@ -7,9 +7,9 @@
 //! Diffie-Hellman operations and the HKDF call are yours.
 //!
 //! Conformance test 3 in `tests/conformance.rs` is the definition of done.
-use rand_core::OsRng;
 use ed25519_dalek::VerifyingKey;
 use hkdf::Hkdf;
+use rand_core::OsRng;
 use sha2::Sha256;
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::Zeroize;
@@ -79,7 +79,7 @@ pub fn derive_sk(dh_concat: &mut Vec<u8>) -> RootKey {
 /// 7. `check_dh` each output.
 /// 8. Concatenate behind `F_PREFIX`, call `derive_sk`.
 /// 9. Zeroise every DH output.
-#[allow(unused_variables)] // remove once implemented
+
 pub fn initiate(
     identity: &IdentityKeyPair,
     bundle: &PreKeyBundle,
@@ -89,8 +89,28 @@ pub fn initiate(
     let dh1 = agree(&identity.dh, &bundle.spk_pub)?;
     let dh2 = agree(&ek_a, &bundle.identity.dh)?;
     let dh3 = agree(&ek_a, &bundle.spk_pub)?;
-    todo!("rest of X3DH")
+    let mut dh_concat = Vec::new();
+    dh_concat.extend_from_slice(&F_PREFIX);
+    dh_concat.extend_from_slice(&dh1);
+    dh_concat.extend_from_slice(&dh2);
+    dh_concat.extend_from_slice(&dh3);
+
+    if let Some(opk) = &bundle.opk_pub {
+        let dh4 = agree(&ek_a, opk)?;
+        dh_concat.extend_from_slice(&dh4);
     }
+
+    let sk = derive_sk(&mut dh_concat);
+
+    Ok((
+        sk,
+        InitialMessage {
+            ek_a: PublicKey::from(&ek_a),
+            spk_id: bundle.spk_id,
+            opk_id: bundle.opk_id,
+        },
+    ))
+}
 
 /// Responder side of X3DH.
 ///

@@ -107,7 +107,11 @@ impl SignedPreKey {
         let secret = StaticSecret::random_from_rng(OsRng);
         let public = PublicKey::from(&secret);
         let signature = identity.sign_prekey(id, &public);
-        SignedPreKey { id, secret, signature }
+        SignedPreKey {
+            id,
+            secret,
+            signature,
+        }
     }
 
     /// The public half.
@@ -208,7 +212,10 @@ mod tests {
     fn prekey_signature_roundtrips() {
         let id = IdentityKeyPair::generate();
         let spk = SignedPreKey::generate(42, &id);
-        assert!(id.public().verify_prekey(42, &spk.public(), &spk.signature).is_ok());
+        assert!(id
+            .public()
+            .verify_prekey(42, &spk.public(), &spk.signature)
+            .is_ok());
     }
 
     #[test]
@@ -216,7 +223,9 @@ mod tests {
         let id = IdentityKeyPair::generate();
         let spk = SignedPreKey::generate(42, &id);
         assert!(
-            id.public().verify_prekey(43, &spk.public(), &spk.signature).is_err(),
+            id.public()
+                .verify_prekey(43, &spk.public(), &spk.signature)
+                .is_err(),
             "swapping the prekey id must invalidate the signature"
         );
     }

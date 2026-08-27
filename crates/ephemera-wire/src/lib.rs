@@ -188,7 +188,12 @@ impl RatchetMessage {
         let n = r.u32()?;
         let ct_len = r.u32()? as usize;
         let ciphertext = r.take(ct_len)?.to_vec();
-        Ok(RatchetMessage { ratchet_pub, pn, n, ciphertext })
+        Ok(RatchetMessage {
+            ratchet_pub,
+            pn,
+            n,
+            ciphertext,
+        })
     }
 }
 
