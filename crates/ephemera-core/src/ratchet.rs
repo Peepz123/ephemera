@@ -11,9 +11,10 @@ use rand_core::OsRng;
 use ed25519_dalek::VerifyingKey;
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::Zeroize;
-
-use crate::error::Result;
-use crate::kdf::{kdf_rk, ChainKey, MessageKey, RootKey};
+use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+use chacha20poly1305::{XChaCha20Poly1305, XNonce};
+use crate::error::{Error, Result};
+use crate::kdf::{expand_message_key, kdf_ck, kdf_rk, ChainKey, MessageKey, RootKey};
 use ephemera_wire::RatchetMessage;
 
 /// Maximum messages that may be skipped within a single chain (T-6).
@@ -116,7 +117,7 @@ impl SessionState {
         ad_ident: [u8; 64],
         peer_identity: VerifyingKey,
         spk_secret: StaticSecret,
-    ) -> Result<Self> {
+    ) -> Result<Self> { 
         Ok(SessionState {
             ad_ident,
             peer_identity,
@@ -144,9 +145,38 @@ impl SessionState {
     /// 4. Build the header, compute AD as `ad_prefix() || ad_ident` (6.3).
     /// 5. Seal with XChaCha20-Poly1305.
     /// 6. Increment `n_send`, zeroise `MK`.
-    #[allow(unused_variables)] // remove once implemented
     pub fn encrypt(&mut self, plaintext: &[u8]) -> Result<RatchetMessage> {
-        todo!("Phase 1: PROTOCOL.md 5.3, 5.4, 6.3")
+        if self.phase == SessionPhase::IdentityChanged {
+            return Err(Error::IdentityChanged);
+            }
+
+        let ck = self.ck_send.as_ref().ok_or(Error::NotEstablished)?;
+        let (next_ck, mk) = kdf_ck(ck);
+        let params = expand_message_key(&mk);
+                let mut ad_msg = RatchetMessage {
+            ratchet_pub: *self.ratchet_pub.as_bytes(),
+            pn: self.pn,
+            n: self.n_send,
+            ciphertext: vec![0u8; plaintext.len() + 16],
+        };
+
+        let mut ad = ad_msg.ad_prefix();
+        ad.extend_from_slice(&self.ad_ident);
+
+        let cipher = XChaCha20Poly1305::new((&params.key).into());
+        let ciphertext = cipher
+            .encrypt(
+                XNonce::from_slice(&params.nonce),
+                Payload { msg: plaintext, aad: &ad },
+            )
+            .map_err(|_| Error::DecryptFailed)?;
+
+        ad_msg.ciphertext = ciphertext;
+
+        self.ck_send = Some(next_ck);
+        self.n_send += 1;
+
+        Ok(ad_msg)
     }
 
     /// Decrypt one message, performing a DH ratchet step if the peer's ratchet
