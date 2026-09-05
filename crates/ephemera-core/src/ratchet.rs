@@ -81,7 +81,6 @@ impl SessionState {
     /// Per PROTOCOL.md 5.1: generate a ratchet keypair, DH against the peer's
     /// signed prekey, and derive the first sending chain. Phase starts as
     /// `PendingInitial`.
-    #[allow(unused_variables)] // remove once implemented
     pub fn initiator(
         rk: RootKey,
         ad_ident: [u8; 64],
@@ -176,7 +175,7 @@ impl SessionState {
         self.ck_send = Some(next_ck);
         self.n_send += 1;
 
-        Ok(ad_msg)
+        Ok(ad_msg)      
     }
 
     /// Decrypt one message, performing a DH ratchet step if the peer's ratchet
@@ -193,8 +192,49 @@ impl SessionState {
     ///    `MAX_SKIP` **without mutating state** (T-6).
     /// 4. Derive, decrypt, verify. On AEAD failure return `DecryptFailed` and
     ///    leave the session unchanged.
-    #[allow(unused_variables)] // remove once implemented
     pub fn decrypt(&mut self, msg: &RatchetMessage) -> Result<Vec<u8>> {
-        todo!("Phase 1: PROTOCOL.md 5.5, and note step 3's atomicity requirement")
+                let incoming = PublicKey::from(msg.ratchet_pub);
+        let is_new_ratchet = self.remote_ratchet_pub.map(|k| k.as_bytes() != &msg.ratchet_pub).unwrap_or(true);
+
+        if is_new_ratchet {
+            self.pn = self.n_send;
+            self.n_send = 0;
+            self.n_recv = 0;
+
+            let priv_key = self.ratchet_priv.as_ref().ok_or(Error::NotEstablished)?;
+            let dh_recv = priv_key.diffie_hellman(&incoming);
+            let (rk1, ck_recv) = kdf_rk(&self.rk, dh_recv.as_bytes());
+
+            let new_priv = StaticSecret::random_from_rng(OsRng);
+            let dh_send = new_priv.diffie_hellman(&incoming);
+            let (rk2, ck_send) = kdf_rk(&rk1, dh_send.as_bytes());
+
+            self.rk = rk2;
+            self.ratchet_pub = PublicKey::from(&new_priv);
+            self.ratchet_priv = Some(new_priv);
+            self.remote_ratchet_pub = Some(incoming);
+            self.ck_recv = Some(ck_recv);
+            self.ck_send = Some(ck_send);
+            self.phase = SessionPhase::Established;
+        }
+        let ck = self.ck_recv.as_ref().ok_or(Error::NotEstablished)?;
+        let (next_ck, mk) = kdf_ck(ck);
+        let params = expand_message_key(&mk);
+
+        let mut ad = msg.ad_prefix();
+        ad.extend_from_slice(&self.ad_ident);
+
+        let cipher = XChaCha20Poly1305::new((&params.key).into());
+        let plaintext = cipher
+            .decrypt(
+                XNonce::from_slice(&params.nonce),
+                Payload { msg: &msg.ciphertext, aad: &ad },
+            )
+            .map_err(|_| Error::DecryptFailed)?;
+
+        self.ck_recv = Some(next_ck);
+        self.n_recv += 1;
+
+        Ok(plaintext)
     }
 }
