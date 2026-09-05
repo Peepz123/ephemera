@@ -7,13 +7,13 @@
 //! are where ratchet implementations actually break — write them first.
 
 use std::collections::HashMap;
-
+use rand_core::OsRng;   
 use ed25519_dalek::VerifyingKey;
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::Zeroize;
 
 use crate::error::Result;
-use crate::kdf::{ChainKey, MessageKey, RootKey};
+use crate::kdf::{kdf_rk, ChainKey, MessageKey, RootKey};
 use ephemera_wire::RatchetMessage;
 
 /// Maximum messages that may be skipped within a single chain (T-6).
@@ -87,7 +87,24 @@ impl SessionState {
         peer_identity: VerifyingKey,
         peer_spk: PublicKey,
     ) -> Result<Self> {
-        todo!("Phase 1: PROTOCOL.md 5.1")
+        let ratchet_priv = StaticSecret::random_from_rng(OsRng);
+        let dh_out = ratchet_priv.diffie_hellman(&peer_spk);
+        let (rk, ck_send) = kdf_rk(&rk, dh_out.as_bytes());
+        Ok(SessionState {
+            ad_ident,
+            peer_identity,
+            phase: SessionPhase::PendingInitial,
+            rk,
+            ratchet_pub: PublicKey::from(&ratchet_priv),
+            ratchet_priv: Some(ratchet_priv),
+            remote_ratchet_pub: Some(peer_spk),
+            ck_send: Some(ck_send),
+            ck_recv: None,
+            n_send: 0,
+            n_recv: 0,
+            pn: 0,
+            skipped: HashMap::new(),
+        })
     }
 
     /// Build the responder's session immediately after X3DH.
