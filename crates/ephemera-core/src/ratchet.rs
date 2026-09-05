@@ -6,17 +6,17 @@
 //! Conformance tests 4 through 10 are the definition of done, and tests 5 to 9
 //! are where ratchet implementations actually break — write them first.
 
-use std::collections::HashMap;
-use rand_core::OsRng;   
-use ed25519_dalek::VerifyingKey;
-use x25519_dalek::{PublicKey, StaticSecret};
-use zeroize::Zeroize;
-use chacha20poly1305::aead::{Aead, KeyInit, Payload};
-use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use crate::error::{Error, Result};
 use crate::kdf::{expand_message_key, kdf_ck, kdf_rk, ChainKey, MessageKey, RootKey};
+use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+use chacha20poly1305::{XChaCha20Poly1305, XNonce};
+use ed25519_dalek::VerifyingKey;
 use ephemera_wire::RatchetMessage;
+use rand_core::OsRng;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use x25519_dalek::{PublicKey, StaticSecret};
+use zeroize::Zeroize;
 
 /// Maximum messages that may be skipped within a single chain (T-6).
 pub const MAX_SKIP: u32 = 1000;
@@ -118,7 +118,7 @@ impl SessionState {
         ad_ident: [u8; 64],
         peer_identity: VerifyingKey,
         spk_secret: StaticSecret,
-    ) -> Result<Self> { 
+    ) -> Result<Self> {
         Ok(SessionState {
             ad_ident,
             peer_identity,
@@ -135,7 +135,6 @@ impl SessionState {
             skipped: HashMap::new(),
         })
     }
-
     /// Encrypt one message, advancing the sending chain.
     ///
     /// # Implementation checklist
@@ -146,7 +145,47 @@ impl SessionState {
     /// 4. Build the header, compute AD as `ad_prefix() || ad_ident` (6.3).
     /// 5. Seal with XChaCha20-Poly1305.
     /// 6. Increment `n_send`, zeroise `MK`.
-        fn skip_to(&mut self, ratchet_pub: [u8; 32], target: u32) -> Result<()> {
+
+    pub fn encrypt(&mut self, plaintext: &[u8]) -> Result<RatchetMessage> {
+        if self.phase == SessionPhase::IdentityChanged {
+            return Err(Error::IdentityChanged);
+        }
+
+        let ck = self.ck_send.as_ref().ok_or(Error::NotEstablished)?;
+        let (next_ck, mk) = kdf_ck(ck);
+        let params = expand_message_key(&mk);
+        let mut ad_msg = RatchetMessage {
+            ratchet_pub: *self.ratchet_pub.as_bytes(),
+            pn: self.pn,
+            n: self.n_send,
+            ciphertext: vec![0u8; plaintext.len() + 16],
+        };
+
+        let mut ad = ad_msg.ad_prefix();
+        ad.extend_from_slice(&self.ad_ident);
+
+        let cipher = XChaCha20Poly1305::new((&params.key).into());
+        let ciphertext = cipher
+            .encrypt(
+                XNonce::from_slice(&params.nonce),
+                Payload {
+                    msg: plaintext,
+                    aad: &ad,
+                },
+            )
+            .map_err(|_| Error::DecryptFailed)?;
+
+        ad_msg.ciphertext = ciphertext;
+
+        self.ck_send = Some(next_ck);
+        self.n_send += 1;
+
+        Ok(ad_msg)
+    }
+    /// Advance the receiving chain to `target`, storing intermediate message
+    /// keys for out-of-order delivery. Refuses past `MAX_SKIP` before mutating
+    /// anything (T-6), then expires and bounds the map.
+    fn skip_to(&mut self, ratchet_pub: [u8; 32], target: u32) -> Result<()> {
         let ck = match self.ck_recv.as_ref() {
             Some(ck) => ck,
             None => return Ok(()),
@@ -170,7 +209,7 @@ impl SessionState {
 
         self.ck_recv = Some(chain);
         self.n_recv = target;
-                self.skipped
+        self.skipped
             .retain(|_, (_, t)| t.elapsed() < Duration::from_secs(7 * 24 * 3600));
 
         while self.skipped.len() > MAX_STORED_SKIPPED {
@@ -189,41 +228,6 @@ impl SessionState {
         Ok(())
     }
 
-
-    pub fn encrypt(&mut self, plaintext: &[u8]) -> Result<RatchetMessage> {
-        if self.phase == SessionPhase::IdentityChanged {
-            return Err(Error::IdentityChanged);
-            }
-
-        let ck = self.ck_send.as_ref().ok_or(Error::NotEstablished)?;
-        let (next_ck, mk) = kdf_ck(ck);
-        let params = expand_message_key(&mk);
-                let mut ad_msg = RatchetMessage {
-            ratchet_pub: *self.ratchet_pub.as_bytes(),
-            pn: self.pn,
-            n: self.n_send,
-            ciphertext: vec![0u8; plaintext.len() + 16],
-        };
-
-        let mut ad = ad_msg.ad_prefix();
-        ad.extend_from_slice(&self.ad_ident);
-
-        let cipher = XChaCha20Poly1305::new((&params.key).into());
-        let ciphertext = cipher
-            .encrypt(
-                XNonce::from_slice(&params.nonce),
-                Payload { msg: plaintext, aad: &ad },
-            )
-            .map_err(|_| Error::DecryptFailed)?;
-
-        ad_msg.ciphertext = ciphertext;
-
-        self.ck_send = Some(next_ck);
-        self.n_send += 1;
-
-        Ok(ad_msg)      
-    }
-
     /// Decrypt one message. State changes commit only on success (T-6, T-7).
     ///
     /// All work happens on a clone; the session is replaced only after the
@@ -235,7 +239,7 @@ impl SessionState {
         *self = next;
         Ok(plaintext)
     }
-        fn decrypt_inner(&mut self, msg: &RatchetMessage) -> Result<Vec<u8>> {
+    fn decrypt_inner(&mut self, msg: &RatchetMessage) -> Result<Vec<u8>> {
         if let Some((mk, _)) = self.skipped.remove(&(msg.ratchet_pub, msg.n)) {
             let params = expand_message_key(&mk);
             let mut ad = msg.ad_prefix();
@@ -244,12 +248,18 @@ impl SessionState {
             return cipher
                 .decrypt(
                     XNonce::from_slice(&params.nonce),
-                    Payload { msg: &msg.ciphertext, aad: &ad },
+                    Payload {
+                        msg: &msg.ciphertext,
+                        aad: &ad,
+                    },
                 )
                 .map_err(|_| Error::DecryptFailed);
         }
         let incoming = PublicKey::from(msg.ratchet_pub);
-        let is_new_ratchet = self.remote_ratchet_pub.map(|k| k.as_bytes() != &msg.ratchet_pub).unwrap_or(true);
+        let is_new_ratchet = self
+            .remote_ratchet_pub
+            .map(|k| k.as_bytes() != &msg.ratchet_pub)
+            .unwrap_or(true);
 
         if is_new_ratchet {
             if let Some(prev) = self.remote_ratchet_pub {
@@ -287,7 +297,10 @@ impl SessionState {
         let plaintext = cipher
             .decrypt(
                 XNonce::from_slice(&params.nonce),
-                Payload { msg: &msg.ciphertext, aad: &ad },
+                Payload {
+                    msg: &msg.ciphertext,
+                    aad: &ad,
+                },
             )
             .map_err(|_| Error::DecryptFailed)?;
 

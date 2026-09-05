@@ -132,8 +132,8 @@ pub fn respond(
     dh_concat.extend_from_slice(&F_PREFIX);
     dh_concat.extend_from_slice(&dh1);
     dh_concat.extend_from_slice(&dh2);
-    dh_concat.extend_from_slice(&dh3);  
-        if let Some(opk) = opk {
+    dh_concat.extend_from_slice(&dh3);
+    if let Some(opk) = opk {
         let dh4 = agree(&opk.secret, &initial.ek_a)?;
         dh_concat.extend_from_slice(&dh4);
     }
