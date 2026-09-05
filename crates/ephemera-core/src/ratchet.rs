@@ -16,6 +16,7 @@ use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use crate::error::{Error, Result};
 use crate::kdf::{expand_message_key, kdf_ck, kdf_rk, ChainKey, MessageKey, RootKey};
 use ephemera_wire::RatchetMessage;
+use std::time::{Duration, Instant};
 
 /// Maximum messages that may be skipped within a single chain (T-6).
 pub const MAX_SKIP: u32 = 1000;
@@ -66,7 +67,7 @@ pub struct SessionState {
     /// Length of the previous sending chain.
     pub pn: u32,
     /// Message keys derived but not yet consumed, for out-of-order delivery.
-    pub skipped: HashMap<SkipId, MessageKey>,
+    pub skipped: HashMap<SkipId, (MessageKey, Instant)>,
 }
 
 impl Drop for SessionState {
@@ -163,12 +164,28 @@ impl SessionState {
         let mut chain = ck.clone();
         for n in self.n_recv..target {
             let (next, mk) = kdf_ck(&chain);
-            self.skipped.insert((ratchet_pub, n), mk);
+            self.skipped.insert((ratchet_pub, n), (mk, Instant::now()));
             chain = next;
         }
 
         self.ck_recv = Some(chain);
         self.n_recv = target;
+                self.skipped
+            .retain(|_, (_, t)| t.elapsed() < Duration::from_secs(7 * 24 * 3600));
+
+        while self.skipped.len() > MAX_STORED_SKIPPED {
+            let oldest = self
+                .skipped
+                .iter()
+                .min_by_key(|(_, (_, t))| *t)
+                .map(|(k, _)| *k);
+            match oldest {
+                Some(k) => {
+                    self.skipped.remove(&k);
+                }
+                None => break,
+            }
+        }
         Ok(())
     }
 
@@ -219,7 +236,7 @@ impl SessionState {
         Ok(plaintext)
     }
         fn decrypt_inner(&mut self, msg: &RatchetMessage) -> Result<Vec<u8>> {
-        if let Some(mk) = self.skipped.remove(&(msg.ratchet_pub, msg.n)) {
+        if let Some((mk, _)) = self.skipped.remove(&(msg.ratchet_pub, msg.n)) {
             let params = expand_message_key(&mk);
             let mut ad = msg.ad_prefix();
             ad.extend_from_slice(&self.ad_ident);
