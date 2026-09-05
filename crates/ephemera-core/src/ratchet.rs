@@ -144,6 +144,34 @@ impl SessionState {
     /// 4. Build the header, compute AD as `ad_prefix() || ad_ident` (6.3).
     /// 5. Seal with XChaCha20-Poly1305.
     /// 6. Increment `n_send`, zeroise `MK`.
+        fn skip_to(&mut self, ratchet_pub: [u8; 32], target: u32) -> Result<()> {
+        let ck = match self.ck_recv.as_ref() {
+            Some(ck) => ck,
+            None => return Ok(()),
+        };
+
+        if target < self.n_recv {
+            return Ok(());
+        }
+
+        let needed = target - self.n_recv;
+        if needed > MAX_SKIP {
+            return Err(Error::SkipLimitExceeded(needed));
+        }
+
+        let mut chain = ck.clone();
+        for n in self.n_recv..target {
+            let (next, mk) = kdf_ck(&chain);
+            self.skipped.insert((ratchet_pub, n), mk);
+            chain = next;
+        }
+
+        self.ck_recv = Some(chain);
+        self.n_recv = target;
+        Ok(())
+    }
+
+
     pub fn encrypt(&mut self, plaintext: &[u8]) -> Result<RatchetMessage> {
         if self.phase == SessionPhase::IdentityChanged {
             return Err(Error::IdentityChanged);
@@ -193,10 +221,25 @@ impl SessionState {
     /// 4. Derive, decrypt, verify. On AEAD failure return `DecryptFailed` and
     ///    leave the session unchanged.
     pub fn decrypt(&mut self, msg: &RatchetMessage) -> Result<Vec<u8>> {
-                let incoming = PublicKey::from(msg.ratchet_pub);
+        if let Some(mk) = self.skipped.remove(&(msg.ratchet_pub, msg.n)) {
+            let params = expand_message_key(&mk);
+            let mut ad = msg.ad_prefix();
+            ad.extend_from_slice(&self.ad_ident);
+            let cipher = XChaCha20Poly1305::new((&params.key).into());
+            return cipher
+                .decrypt(
+                    XNonce::from_slice(&params.nonce),
+                    Payload { msg: &msg.ciphertext, aad: &ad },
+                )
+                .map_err(|_| Error::DecryptFailed);
+        }
+        let incoming = PublicKey::from(msg.ratchet_pub);
         let is_new_ratchet = self.remote_ratchet_pub.map(|k| k.as_bytes() != &msg.ratchet_pub).unwrap_or(true);
 
         if is_new_ratchet {
+            if let Some(prev) = self.remote_ratchet_pub {
+                self.skip_to(*prev.as_bytes(), msg.pn)?;
+            }
             self.pn = self.n_send;
             self.n_send = 0;
             self.n_recv = 0;
@@ -217,6 +260,7 @@ impl SessionState {
             self.ck_send = Some(ck_send);
             self.phase = SessionPhase::Established;
         }
+        self.skip_to(msg.ratchet_pub, msg.n)?;
         let ck = self.ck_recv.as_ref().ok_or(Error::NotEstablished)?;
         let (next_ck, mk) = kdf_ck(ck);
         let params = expand_message_key(&mk);
