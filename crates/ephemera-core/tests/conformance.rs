@@ -233,3 +233,25 @@ fn t10_cross_session_rejection() {
     let ct = a1.encrypt(b"wrong session").expect("encrypt");
     assert!(b2.decrypt(&ct).is_err(), "AD_ident must bind the session");
 }
+
+/// Test 11 — a forged message must not mutate session state.
+#[test]
+fn t11_forged_message_leaves_state_untouched() {
+    let p = Pair::new();
+    let (mut a, mut b) = p.establish(true);
+    let real = a.encrypt(b"legit").expect("encrypt");
+    b.decrypt(&real).expect("decrypt");
+
+    let mut forged = a.encrypt(b"also legit").expect("encrypt");
+    forged.n = 900;
+    forged.ciphertext = vec![0xAA; forged.ciphertext.len()];
+
+    let rk_before = b.rk.0;
+    let n_before = b.n_recv;
+    let skipped_before = b.skipped.len();
+
+    assert!(b.decrypt(&forged).is_err());
+    assert_eq!(b.rk.0, rk_before);
+    assert_eq!(b.n_recv, n_before);
+    assert_eq!(b.skipped.len(), skipped_before);
+}
