@@ -1,8 +1,8 @@
 # Protocol specification
 
 **Project:** `ephemera`
-**Version:** 0.1 (draft)
-**Status:** Phase 0. Normative for the `ephemera-core` and `ephemera-wire` crates.
+**Version:** 0.2
+**Status:** Phase 1 complete. Normative for the `ephemera-core` and `ephemera-wire` crates.
 **Companion document:** `THREAT-MODEL.md` — goal and threat IDs referenced here (`G-*`, `T-*`) are defined there.
 
 Requirement keywords (MUST, SHOULD, MAY) follow RFC 2119.
@@ -187,12 +187,15 @@ On receiving a message with `n` greater than expected, the receiver advances the
 - `MAX_STORED_SKIPPED = 2000` across the session, evicted oldest-first.
 - Skipped keys expire after 7 days and are zeroised on eviction or expiry.
 - A skipped key MUST be deleted immediately on use — this is what makes replay detection (T-5) work.
+- Decryption MUST NOT mutate session state unless the AEAD verifies. An implementation that advances the chain, stores skipped keys, or performs a DH ratchet step before authenticating the payload allows an attacker to desynchronise a session with forged ciphertext, without breaking any cryptography. Implementations SHOULD operate on a copy of the session and commit only on success.
 
 ### 5.6 Session state
 
 ```
 SessionState
   ad_ident            : [u8; 64]
+  peer_identity       : [u8; 32]   Ed25519, pinned
+  phase               : SessionPhase
   rk                  : [u8; 32]
   ratchet_priv        : Option<X25519Secret>
   ratchet_pub         : [u8; 32]
@@ -353,17 +356,14 @@ Zero rows returned means already consumed, and the handler returns 410 Gone. A r
 
 The object is deleted from storage asynchronously within 60 seconds of the state transition. The state flag, not the object lifetime, is the enforcement point.
 
-### 8.2 Timers — amendment to T-11
+### 8.2 Timers
 
-`THREAT-MODEL.md` T-11 specifies a server-attested timestamp delivered inside the encrypted envelope. **This is not constructible.** The server cannot insert anything into a payload it cannot decrypt, and any timestamp it attaches outside the envelope is unauthenticated and attacker-controllable under ADV-4.
+Expiry timers cannot depend on a server-supplied timestamp: the server cannot insert one into a payload it cannot read, and anything it attaches outside the envelope is unauthenticated and attacker-controllable under ADV-4. Nor can they depend on the device's wall clock, which the user controls.
 
-Corrected design:
-
-- The expiry timer starts at **local view time**, measured on a monotonic clock (`Instant` / `performance.now()`), never on wall-clock time.
+- The expiry timer starts at **local view time**, measured on a monotonic clock (`Instant` / `performance.now()`).
 - `sent_at_ms` in the `Content` header is advisory display metadata only and MUST NOT drive expiry.
 - If the monotonic reference is lost — process restart, tab discard, device reboot — unexpired ephemeral content MUST be treated as expired and deleted. Failing closed is correct here: the cost is a lost message, and the alternative is an unbounded window.
 
-`THREAT-MODEL.md` §8 requires updating to reflect this.
 
 ### 8.3 Client obligations for one-view content
 
@@ -427,6 +427,8 @@ The server MUST NOT log envelope bodies, blob contents, or delivery pairs beyond
 8. **Replay** — re-delivering a decrypted message MUST error.
 9. **Header tamper** — flipping any bit in `pn`, `n`, or `ratchet_pub` MUST fail the AEAD.
 10. **Cross-session** — a valid envelope from session A MUST fail against session B.
+11. **Atomicity under forgery** — a message with a valid header, an advanced `n`, and a forged ciphertext MUST error and leave `rk`, `n_recv`, and the skipped-key map unchanged.
+12. **Map ceiling** *(not yet implemented)* — the skipped-key map MUST NOT exceed `MAX_STORED_SKIPPED` across repeated large skips and ratchet steps.
 
 Tests 4–6 SHOULD additionally be expressed as `proptest` properties over randomised delivery orderings.
 

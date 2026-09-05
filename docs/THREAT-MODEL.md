@@ -1,8 +1,8 @@
 # Threat model
 
 **Project:** `ephemera` (working name)
-**Document status:** Phase 0 — baseline. Amend before, not after, any design change that touches key handling, storage, or the trust boundary.
-**Version:** 0.1
+**Document status:** Phase 1 complete
+**Version:** 0.2
 **Last reviewed:** 2026-08-25
 
 ---
@@ -122,9 +122,10 @@ Listing these is a security control in its own right: a guarantee the UI implies
 | ID | Threat | Mitigation |
 |---|---|---|
 | T-5 | Message replay within an established session | Per-chain message counter; recipient rejects previously-seen `(chain_id, counter)` pairs within the skipped-key window |
-| T-6 | Unbounded skipped-message key retention exhausts memory or extends the forward-secrecy window | Hard cap (`MAX_SKIP = 1000`) on stored skipped keys; keys expire on a TTL and are zeroised |
+| T-6 | Unbounded skipped-message key retention exhausts memory or extends the forward-secrecy window | `MAX_SKIP = 1000` per chain, checked before any state mutation; `MAX_STORED_SKIPPED = 2000` across the session, evicted oldest-first; entries expire after 7 days and are zeroised on eviction |
 | T-7 | Ciphertext modification or truncation | AEAD over the full payload; associated data binds the header (sender identity, chain ID, counter) so headers cannot be swapped between messages |
 | T-8 | Key material lingering in memory after use | Wrap all secrets in `Zeroize`/`ZeroizeOnDrop` types; never place them in `String` or `Vec<u8>` without the wrapper |
+| T-22 | Forged ciphertext with an advanced counter desynchronises a session without breaking any cryptography | Decryption operates on a copy of the session state and commits only after the AEAD verifies; a failed decrypt leaves `rk`, chain keys, counters, and the skipped map unchanged |
 
 ### Attachments and one-view content
 
@@ -132,7 +133,7 @@ Listing these is a security control in its own right: a guarantee the UI implies
 |---|---|---|
 | T-9 | Blob store enumeration reveals ciphertext volumes and sizes | 256-bit unguessable blob IDs; no list endpoint; authenticated fetch bound to the intended recipient |
 | T-10 | Race condition allows two successful GETs on a one-view blob | Atomic compare-and-delete: a single `UPDATE … WHERE state = 'unread' RETURNING …` transaction, never read-then-delete |
-| T-11 | Recipient device clock manipulation extends a disappearing-message timer | Timers key off a server-attested timestamp delivered inside the encrypted envelope, not `Date.now()` |
+| T-11 | Recipient device clock manipulation extends a disappearing-message timer | Timer starts at local view time on a monotonic clock; `sent_at_ms` is advisory only; loss of the monotonic reference (restart, reboot, tab discard) expires the content — fail closed. A server-attested timestamp is not constructible: the server cannot write into a payload it cannot read. See PROTOCOL.md §8.2 |
 | T-12 | Decrypted media persisted to disk cache or OS thumbnail pipeline | Decrypt to an in-memory buffer, render from a blob URL, revoke and zeroise on dismissal; never hand the plaintext to a platform media API that caches |
 | T-13 | Attachment key reuse across blobs | One random content encryption key per blob, generated at encrypt time, transported only inside the ratcheted message body |
 
@@ -153,6 +154,7 @@ Listing these is a security control in its own right: a guarantee the UI implies
 | T-19 | Server logs retain routing metadata beyond operational need | No message-level logging; IP logs disabled at the reverse proxy; documented retention policy of zero for delivery records post-ack |
 | T-20 | Dependency compromise in the supply chain | `cargo-audit` and `cargo-deny` in CI as blocking checks; lockfile committed; SBOM generated per release |
 | T-21 | Username enumeration via registration or lookup timing | Constant-time-ish uniform responses on lookup; per-IP rate limiting; accepted as low severity (A-7) |
+
 
 ---
 
@@ -190,3 +192,8 @@ Re-open this document when any of the following occur:
 - A dependency providing a primitive named in TA-3 is replaced
 - Multi-device support is added — this invalidates large parts of §6
 - Anyone proposes group messaging — see §1; this requires re-deriving the document from scratch, not amending it
+- A conformance test is added, removed, or weakened
+
+## 12. Corrections
+
+- **T-11, v0.1 → v0.2.** The original mitigation specified a server-attested timestamp delivered inside the encrypted envelope. This is not constructible — the server cannot write into a payload it cannot read. Caught while writing PROTOCOL.md §8.2, before any implementation existed. Replaced with the monotonic-clock, fail-closed design.
