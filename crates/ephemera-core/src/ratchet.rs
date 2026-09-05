@@ -111,14 +111,27 @@ impl SessionState {
     ///
     /// The responder's initial ratchet keypair *is* the signed prekey pair, and
     /// both chains start empty. The first DH ratchet happens on first receive.
-    #[allow(unused_variables)] // remove once implemented
     pub fn responder(
         rk: RootKey,
         ad_ident: [u8; 64],
         peer_identity: VerifyingKey,
         spk_secret: StaticSecret,
     ) -> Result<Self> {
-        todo!("Phase 1: PROTOCOL.md 5.1")
+        Ok(SessionState {
+            ad_ident,
+            peer_identity,
+            phase: SessionPhase::Established,
+            rk,
+            ratchet_pub: PublicKey::from(&spk_secret),
+            ratchet_priv: Some(spk_secret),
+            remote_ratchet_pub: None,
+            ck_send: None,
+            ck_recv: None,
+            n_send: 0,
+            n_recv: 0,
+            pn: 0,
+            skipped: HashMap::new(),
+        })
     }
 
     /// Encrypt one message, advancing the sending chain.
