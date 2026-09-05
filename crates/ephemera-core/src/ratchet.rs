@@ -39,6 +39,7 @@ pub enum SessionPhase {
 }
 
 /// A live Double Ratchet session with exactly one peer.
+#[derive(Clone)]
 pub struct SessionState {
     /// `AD_ident`, fixed for the session lifetime.
     pub ad_ident: [u8; 64],
@@ -206,21 +207,18 @@ impl SessionState {
         Ok(ad_msg)      
     }
 
-    /// Decrypt one message, performing a DH ratchet step if the peer's ratchet
-    /// key has changed.
+    /// Decrypt one message. State changes commit only on success (T-6, T-7).
     ///
-    /// # Implementation checklist
-    ///
-    /// 1. Try `skipped` first, keyed by `(msg.ratchet_pub, msg.n)`. On hit,
-    ///    decrypt and **delete the entry** — that deletion is what makes replay
-    ///    detection work (T-5).
-    /// 2. If `msg.ratchet_pub` differs from `remote_ratchet_pub`, skip to
-    ///    `msg.pn` in the current receiving chain, then DH ratchet.
-    /// 3. Skip forward to `msg.n`, storing intermediate keys, refusing past
-    ///    `MAX_SKIP` **without mutating state** (T-6).
-    /// 4. Derive, decrypt, verify. On AEAD failure return `DecryptFailed` and
-    ///    leave the session unchanged.
+    /// All work happens on a clone; the session is replaced only after the
+    /// AEAD verifies. A forged or replayed message therefore cannot advance
+    /// the receiving chain or populate the skipped-key map.
     pub fn decrypt(&mut self, msg: &RatchetMessage) -> Result<Vec<u8>> {
+        let mut next = self.clone();
+        let plaintext = next.decrypt_inner(msg)?;
+        *self = next;
+        Ok(plaintext)
+    }
+        fn decrypt_inner(&mut self, msg: &RatchetMessage) -> Result<Vec<u8>> {
         if let Some(mk) = self.skipped.remove(&(msg.ratchet_pub, msg.n)) {
             let params = expand_message_key(&mk);
             let mut ad = msg.ad_prefix();
