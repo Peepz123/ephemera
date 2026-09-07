@@ -3,8 +3,9 @@
 A private, end-to-end encrypted 1:1 messaging service. Text, attachments,
 recorded audio and video, real-time calls, and single-view messages.
 
-**Status: Phase 1, in progress.** Not usable, not audited, not secure yet.
-Do not use this for anything.
+**Status: Phase 1 complete.** The cryptographic core is implemented and passes its
+conformance suite. Not audited, not deployed, no server yet. Do not use this for
+anything real.
 
 ## Documents
 
@@ -31,6 +32,23 @@ lifecycle, and the wire format.
 no persistence, and no async. That is what makes it testable against
 deterministic vectors and cheap to target at WASM and JNI later.
 
+## What the specifications caught
+
+Both documents were written before any code existed, and both found defects that
+tests would not have.
+
+`THREAT-MODEL.md` T-11 originally required a server-attested timestamp inside the
+encrypted envelope, to stop a recipient extending a disappearing-message timer by
+changing their clock. Writing `PROTOCOL.md` §8.2 showed this is not constructible:
+the server cannot write into a payload it cannot read. Replaced with a monotonic
+clock that fails closed. Recorded in THREAT-MODEL.md §12.
+
+T-22 came out of a code review after the suite was already green. Decryption
+advanced the receiving chain before the AEAD verified, so forged ciphertext with
+an inflated counter could desynchronise a session without breaking any
+cryptography. Decryption now commits only on success, and conformance test 11
+holds it to that.
+
 ## Layout
 
     crates/ephemera-core/   X3DH + Double Ratchet. Pure computation.
@@ -43,10 +61,11 @@ Requires a current stable Rust toolchain.
 
     cargo test
 
-24 tests pass. 9 fail. The 9 failures are `tests/conformance.rs`, which encodes
-PROTOCOL.md section 11 as executable checks and defines "Phase 1 complete".
+25 tests pass across three suites: RFC 5869 and RFC 7748 vectors, wire-format
+round-trips and rejection cases, and twelve conformance tests encoding
+PROTOCOL.md section 11.
 
 ## What is not here yet
 
-Relay server, blob storage, web client, WebRTC calls. Those are Phases 2 to 5
-and none of them should start before the conformance suite is green.
+Relay server, blob storage, web client, WebRTC calls. Phase 2 begins with the
+relay; see NEXT.md.
