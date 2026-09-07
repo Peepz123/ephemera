@@ -1,7 +1,7 @@
 # Protocol specification
 
 **Project:** `ephemera`
-**Version:** 0.2
+**Version:** 0.3
 **Status:** Phase 1 complete. Normative for the `ephemera-core` and `ephemera-wire` crates.
 **Companion document:** `THREAT-MODEL.md` — goal and threat IDs referenced here (`G-*`, `T-*`) are defined there.
 

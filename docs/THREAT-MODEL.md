@@ -2,8 +2,8 @@
 
 **Project:** `ephemera` (working name)
 **Document status:** Phase 1 complete
-**Version:** 0.2
-**Last reviewed:** 2026-08-25
+**Version:** 0.3
+**Last reviewed:** 2026-09-07
 
 ---
 
