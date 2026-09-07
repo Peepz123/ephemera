@@ -5,15 +5,13 @@
 
 ## Right now
 
-**Get the relay running against Postgres and answering `/health/ready`.**
-
-1. `cd deploy && docker compose up -d`
-2. `cd .. && cargo run -p ephemera-server`
-3. `curl localhost:8080/health/ready` → `{"status":"ready"}`
-
-That proves the pool connects and migrations applied. Nothing else in the
-server works yet, and that's fine — this is the equivalent of Phase 1's
-"24 passing, 9 failing" baseline.
+Implement `register` in `server/src/routes/accounts.rs`.
+Decode the three base64 fields, verify ik_dh_sig over
+"ephemera_ikdh_v1" || ik_dh, insert.
+Duplicate username must return 409, not 500 —
+sqlx::Error::Database(e) with e.is_unique_violation().
+Proven by: curl a registration, then curl the same one again.
+Reference: PROTOCOL.md 3.1.
 
 ## Order of work
 

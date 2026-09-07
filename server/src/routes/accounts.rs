@@ -1,11 +1,14 @@
 //! Registration — `POST /v1/accounts`.
 //!
 //! # Status: not implemented
-
+use ed25519_dalek::{Signature, Verifier};
+use crate::auth;
 use axum::extract::State;
 use axum::Json;
 use serde::{Deserialize, Serialize};
-
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
+use crate::error::ApiError;
 use crate::error::ApiResult;
 use crate::AppState;
 
@@ -29,6 +32,15 @@ pub struct RegisterResponse {
     pub account_id: String,
 }
 
+
+/// Decode a base64 field and check it is exactly `expected` bytes.
+fn decode_fixed(s: &str, expected: usize) -> ApiResult<Vec<u8>> {
+    let bytes = STANDARD.decode(s).map_err(|_| ApiError::BadRequest)?;
+    if bytes.len() != expected {
+        return Err(ApiError::BadRequest);
+    }
+    Ok(bytes)
+}   
 /// Register a new account.
 ///
 /// # Implementation checklist
@@ -42,10 +54,52 @@ pub struct RegisterResponse {
 /// Note this verification is a courtesy: clients MUST NOT trust it, because
 /// the server is untrusted (T-1). It exists to keep unusable rows out of the
 /// database, not to provide a security guarantee.
-#[allow(unused_variables)]
+
 pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
 ) -> ApiResult<Json<RegisterResponse>> {
-    todo!("Phase 2: PROTOCOL.md 3.1")
+        let ik_sig = decode_fixed(&req.ik_sig, 32)?;
+        let ik_dh = decode_fixed(&req.ik_dh, 32)?;
+        let ik_dh_sig = decode_fixed(&req.ik_dh_sig, 64)?;
+
+            let vk = auth::parse_verifying_key(&ik_sig)?;
+
+    let mut msg = Vec::with_capacity(16 + 32);
+    msg.extend_from_slice(b"ephemera_ikdh_v1");
+    msg.extend_from_slice(&ik_dh);
+
+    let sig_bytes: [u8; 64] = ik_dh_sig
+        .as_slice()
+        .try_into()
+        .map_err(|_| ApiError::BadRequest)?;
+    let sig = Signature::from_bytes(&sig_bytes);
+
+    vk.verify(&msg, &sig).map_err(|_| ApiError::BadRequest)?;
+
+        let account_id = uuid::Uuid::new_v4();
+
+    let result = sqlx::query(
+        "INSERT INTO accounts (id, username, ik_sig, ik_dh, ik_dh_sig)
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(account_id)
+    .bind(&req.username)
+    .bind(&ik_sig)
+    .bind(&ik_dh)
+    .bind(&ik_dh_sig)
+    .execute(&state.db)
+    .await;
+
+    match result {
+        Ok(_) => {}
+        Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
+            return Err(ApiError::Conflict)
+        }
+        Err(e) => return Err(e.into()),
+    }
+
+    Ok(Json(RegisterResponse {
+        account_id: account_id.to_string(),
+    }))
 }

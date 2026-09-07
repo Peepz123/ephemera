@@ -32,3 +32,6 @@ uuid = { version = "1", features = ["v4", "serde"] }
 rand_core.workspace = true
 base64 = "0.22"
 hex.workspace = true
+
+[dev-dependencies]
+ephemera-core = { path = "../crates/ephemera-core" }
