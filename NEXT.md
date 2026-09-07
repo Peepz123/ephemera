@@ -1,38 +1,39 @@
 # Next action
 
 > Update this file at the end of every working session. One concrete action,
-> with the file and the test that proves it. Not "continue the ratchet".
+> with the file and the check that proves it.
 
 ## Right now
 
-**Implement `x3dh::initiate` in `crates/ephemera-core/src/x3dh.rs`.**
+**Get the relay running against Postgres and answering `/health/ready`.**
 
-- Checklist is in the doc comment above the function.
-- Proven by: `cargo test --test conformance t3_`
-- Reference: `docs/PROTOCOL.md` section 4.
-- `agree()` and `derive_sk()` in the same module are already written — you need
-  the four DH calls in the right order and the concatenation behind `F_PREFIX`.
+1. `cd deploy && docker compose up -d`
+2. `cd .. && cargo run -p ephemera-server`
+3. `curl localhost:8080/health/ready` → `{"status":"ready"}`
+
+That proves the pool connects and migrations applied. Nothing else in the
+server works yet, and that's fine — this is the equivalent of Phase 1's
+"24 passing, 9 failing" baseline.
 
 ## Order of work
 
-1. `x3dh::initiate` + `x3dh::respond` → t3, t3b
-2. `SessionState::initiator` / `responder` → unblocks everything else
-3. `SessionState::encrypt` → t4 (partially)
-4. `SessionState::decrypt`, in-order path → t4
-5. Skipped-key storage → t5, t6
-6. Skip cap, atomically → t7
-7. Skipped-key deletion on use → t8
-8. Confirm AD covers the header → t9, t10 should pass without new code
+1. Health endpoints answering, migrations applied
+2. `POST /v1/accounts` — registration
+3. `auth::issue_challenge` / `verify_challenge`
+4. `POST /v1/keys/prekeys` — publication
+5. `GET /v1/keys/:username` — **atomic OPK consume**, see the note in the source
+6. `WS /v1/ws` — store-and-forward
+7. Blobs — **atomic one-view consume**, see the note in the source
 
-Steps 5 to 8 are where ratchet implementations break. Do not rush them.
-
-## State of the suite
-
-    cargo test              # 24 passing, 9 failing — the 9 are the work
-    cargo test --test conformance   # just the failing ones
+Steps 5 and 7 are the two that matter. Both are single-statement atomicity
+requirements, and both fail silently if you get them wrong: no error, just a
+guarantee that quietly isn't true.
 
 ## Notes to self
 
-- Every `#[allow(unused_variables)]` in the source is a marker for unimplemented
-  code. When the last one is gone, Phase 1 is done.
-- `git grep -n 'todo!'` is the other progress bar.
+- The server crate has no `ephemera-core` dependency, by design. If you reach
+  for it, what you're writing belongs on the client.
+- `git grep -n 'todo!' server/` is the progress bar.
+- Async Rust is new. Expect the borrow checker to be harder here than in the
+  core crate; state moved into handlers needs `Clone`, and `.await` points are
+  where lifetimes get interesting.

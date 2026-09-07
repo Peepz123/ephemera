@@ -1,0 +1,34 @@
+[package]
+name = "ephemera-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Store-and-forward relay. Handles no key material and cannot decrypt anything it stores."
+
+# NOTE: this crate deliberately does NOT depend on `ephemera-core`.
+#
+# The relay parses envelope headers for routing (ephemera-wire) and verifies
+# Ed25519 signatures for authentication (ed25519-dalek). It never holds a
+# private key, never derives a shared secret, and never touches a ratchet.
+# Adding `ephemera-core` here would be a design regression — if you find
+# yourself wanting it, the thing you are about to write belongs on the client.
+
+[dependencies]
+ephemera-wire.workspace = true
+
+axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+tower-http = { version = "0.5", features = ["trace", "limit"] }
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio-rustls", "postgres", "macros", "migrate", "uuid", "chrono",
+] }
+ed25519-dalek = "2.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror.workspace = true
+uuid = { version = "1", features = ["v4", "serde"] }
+rand_core.workspace = true
+base64 = "0.22"
+hex.workspace = true
