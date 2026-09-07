@@ -407,9 +407,42 @@ The relay stores and forwards. It performs no cryptographic operation on user co
 | `POST` | `/v1/blobs` | Upload attachment ciphertext, returns `blob_id` |
 | `GET` | `/v1/blobs/{blob_id}` | Retrieve; atomic consume for one-view (§8.1) |
 
-Authentication is a signature over a server-issued challenge using `IK_sig`. No password, no recoverable credential.
+### 10.1 Authentication
 
-The server MUST NOT log envelope bodies, blob contents, or delivery pairs beyond acknowledgement (T-19).
+Authentication is a signature over a server-issued challenge using `IK_sig`.
+The nonce is valid for 60 seconds and is consumed on lookup, not on success:
+a nonce that has been presented once is gone whether or not the signature
+verified. The server issues a challenge for any well-formed username, whether
+or not an account exists, and fails only at verification (T-21).
+
+`IK_sig` is the only durable credential in the system. It never leaves the
+device, is not derived from anything the user can remember, and has no
+recovery path. There is no password, no reset flow, no escrow, and no
+server-side material from which a user's identity can be reconstituted (NG-6).
+
+### 10.2 Session tokens
+
+A successful verification returns an opaque session token, presented on
+subsequent requests as `Authorization: Bearer <token>`.
+The token is a short-lived session artifact, not a credential in the sense of
+§10.1. It is bounded in three ways, and all three are load-bearing:
+
+- **It authenticates to the relay only.** The relay holds no key that decrypts
+  anything. A stolen token grants an attacker the relay's API surface —
+  fetching prekey bundles, sending and receiving envelopes as that account —
+  and no access whatsoever to message content, past or future.
+- **It expires.** Possession confers nothing after the lifetime elapses; there
+  is no refresh and no long-lived form.
+- **It cannot be escalated.** A token does not authorise identity-key change,
+  and cannot be exchanged for `IK_sig` or for any longer-lived credential.
+
+Tokens are stored as SHA-256 hashes; the server retains no value that can be
+replayed from a database dump (T-19). Expired rows are deleted on lookup and
+swept periodically.
+
+This is what "no recoverable credential" means in this specification: nothing
+the server holds, and nothing the operator can be compelled to produce, allows
+impersonation beyond the token lifetime or decryption at any point (ADV-7).
 
 ---
 

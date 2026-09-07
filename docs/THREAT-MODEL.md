@@ -197,3 +197,12 @@ Re-open this document when any of the following occur:
 ## 12. Corrections
 
 - **T-11, v0.1 → v0.2.** The original mitigation specified a server-attested timestamp delivered inside the encrypted envelope. This is not constructible — the server cannot write into a payload it cannot read. Caught while writing PROTOCOL.md §8.2, before any implementation existed. Replaced with the monotonic-clock, fail-closed design.
+- **§10, v0.2 → v0.3.** The original text stated "no password, no recoverable
+  credential" without qualification. Implementing the server showed this to be
+  too absolute: every endpoint past registration needs to identify its caller,
+  and a per-request signature scheme requires its own replay defence that
+  duplicates the challenge table. A short-lived session token was adopted
+  instead, and §10 reworded to state precisely what the token is and what it
+  does not grant. The substantive commitments — no password, no recovery, no
+  escrow, no server-side ability to decrypt — are unchanged. Caught while
+  writing the authenticated-caller extractor, before the token existed.
