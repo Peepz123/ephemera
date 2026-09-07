@@ -5,3 +5,4 @@ pub mod blobs;
 pub mod health;
 pub mod keys;
 pub mod ws;
+pub mod auth;

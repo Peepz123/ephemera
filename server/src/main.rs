@@ -52,6 +52,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/health/live", get(routes::health::live))
         .route("/health/ready", get(routes::health::ready))
+        .route("/v1/auth/challenge", post(routes::auth::challenge))
+        .route("/v1/auth/verify", post(routes::auth::verify))
         .route("/v1/accounts", post(routes::accounts::register))
         .route("/v1/keys/prekeys", post(routes::keys::publish))
         .route("/v1/keys/count", get(routes::keys::count))
