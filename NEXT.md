@@ -5,30 +5,34 @@
 
 ## Right now
 
-Decide how an authenticated caller reaches a handler, and record it in
-PROTOCOL.md §10.
+Write `server/migrations/0002_auth_tokens.sql`.
 
-`auth::verify_challenge` returns a `Caller`, and nothing consumes it —
-`/v1/auth/verify` serialises the UUID and drops it. Every remaining endpoint
-except the health checks needs to know who is calling, so this blocks
-`keys::publish`, `keys::count`, blobs, and the WebSocket.
+Decision made 2026-09-07: short-lived opaque session token, specified in
+PROTOCOL.md §10.2. §10 was reworded and the correction recorded in
+THREAT-MODEL.md §12.
 
-The constraint is §10: "no password, no recoverable credential." A long-lived
-bearer token is a recoverable credential and contradicts that sentence. Options
-worth weighing:
+The table has to carry what §10.2 commits to: a 32-byte token stored as a
+SHA-256 hash, scoped to exactly one account, expiring 15 minutes from issue,
+deleted on lookup when expired and swept periodically.
 
-- Short-lived opaque token in a `token` table, returned by `/v1/auth/verify`,
-  presented as a bearer header. Simple; needs a TTL short enough that §10 stays
-  honest, and an expiry sweep.
-- Per-request signature — sign method, path, and a timestamp with `IK_sig`.
-  No stored credential at all, closest to the spirit of §10, more work on
-  every client call and needs replay defence of its own.
+Open questions to settle while writing it:
 
-Whichever is chosen, it lands as an axum extractor (`FromRequestParts` for
-`Caller`) so handlers take `caller: Caller` and cannot forget the check.
+- Primary key — the hash is unique and unguessable, which suggests one answer.
+  But is there ever a need to look up tokens *by account*, to invalidate all
+  sessions on identity change? That changes what gets indexed.
+- Store `account_id` directly rather than `username`. The account id is known
+  at issue time, and a foreign key gets `ON DELETE CASCADE`, which
+  `auth_challenges` does not have.
+- `CHECK (octet_length(...) = 32)` on the hash, matching the convention in
+  `0001_init.sql`.
+- Which column does the sweep need an index on?
 
-Proven by: a request to a protected endpoint without credentials returns 401,
-and the same request with them returns 200.
+Proven by: `cargo run -p ephemera-server` applies the migration cleanly on
+startup.
+
+Then `auth::issue_token` / `verify_token`, then `/v1/auth/verify` returning a
+token, then `impl FromRequestParts for Caller`, then `caller: Caller` on
+`keys::publish` — proven by a 401 without credentials and a 200 with them.
 
 ## Order of work
 
@@ -38,9 +42,10 @@ and the same request with them returns 200.
    verified 2026-09-07: register 200, challenge 200, verify 200 returning the
    registered account id, replay 401, challenge for an unregistered username
    issued and 401 only at verify (T-21)
-4. **Authenticated-caller carriage** — the item above
-5. `POST /v1/keys/prekeys` — publication
-6. `GET /v1/keys/:username` — **atomic OPK consume**, see the note in the source
+4. ~~Authenticated-caller carriage — decision~~ done: short-lived opaque
+   token, PROTOCOL.md §10.2
+5. Token table, `Caller` extractor
+6. `POST /v1/keys/prekeys` — publication
 7. `WS /v1/ws` — store-and-forward
 8. Blobs — **atomic one-view consume**, see the note in the source
 
@@ -71,6 +76,11 @@ guarantee that quietly isn't true.
 - **CI.** `cargo test`, `cargo clippy`, `cargo fmt --check`, `cargo audit`.
   T-20 commits to cargo-audit and cargo-deny as blocking checks and there is
   currently nothing behind that claim.
+- **WebSocket token lifetime is unresolved.** A 15-minute token against a
+  connection that may stay open for hours: checked only at connect, or
+  re-checked during the connection's life? If only at connect, the effective
+  bound on relay access is the connection lifetime, and PROTOCOL.md §10.2
+  overstates its guarantee. Settle before writing `routes::ws::handler`.
 
 ## Notes to self
 
@@ -88,3 +98,6 @@ guarantee that quietly isn't true.
 - Examples cannot reach a binary crate's private modules, which is why
   `sign.rs` duplicates `CTX_AUTH`. A `lib.rs` re-exporting the modules would
   fix it properly.
+  - Session tokens are hashed at rest, so `verify_token` hashes the presented
+  token and looks up by hash. There is no way to recover a token from the
+  table, which is the point.
